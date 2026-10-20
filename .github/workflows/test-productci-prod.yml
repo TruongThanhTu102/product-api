@@ -1,0 +1,56 @@
+name: Product API Integration CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        image: mongo:7
+        env:
+          MONGO_INITDB_ROOT_USERNAME: admin
+          MONGO_INITDB_ROOT_PASSWORD: devpassword123
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --username admin --password devpassword123 --authenticationDatabase admin --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start API server
+        run: |
+          MONGO_URI="mongodb://admin:devpassword123@localhost:27017/productdb?authSource=admin" npm start > api.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://localhost:3000/; then
+              echo "API is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat api.log
+          exit 1
+
+      - name: Test complete Product CRUD
+        run: node --test tests/product.integration.test.js
+        env:
+          API_URL: http://localhost:3000
